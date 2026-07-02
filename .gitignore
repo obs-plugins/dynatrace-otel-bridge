@@ -1,0 +1,8 @@
+# Segredos locais — nunca versionar. Só .env.example é commitado.
+.env
+**/.env
+!**/.env.example
+
+# OS / editor
+.DS_Store
+*.swp
