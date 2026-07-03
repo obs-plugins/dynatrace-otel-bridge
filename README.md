@@ -1,57 +1,53 @@
 # dynatrace-otel-bridge
 
-Ponte de telemetria **OpenTelemetry → Dynatrace**. Sobe um **OTel Collector** que recebe
-traces, métricas e logs via OTLP e os reencaminha para um tenant Dynatrace. É agnóstico à
-aplicação: **qualquer** app instrumentada com OTel (Dify ou outra) pode apontar para ele.
+OpenTelemetry → Dynatrace telemetry bridge. Spins up an OTel Collector that receives traces, metrics, and logs via OTLP and forwards them to a Dynatrace tenant. It is application‑agnostic: any app instrumented with OTel (Dify or otherwise) can send data to it.
 
-> Este repo é o *write/emit path* (telemetria a entrar no Dynatrace). O *read path* — consultar
-> problemas e métricas do Dynatrace a partir de apps — vive noutro repo (plugin Dify).
+This repo is the write/emit path (telemetry going into Dynatrace).
+The read path — querying Dynatrace problems and metrics from apps — lives in a different repo (the Dify plugin).
 
-## Componentes
+## Components
 
-- `infra/collector/otelcol-config.yaml` — config do Collector: receivers OTLP (gRPC+HTTP),
-  processors `resource`/`batch`, exporter `otlphttp` para Dynatrace, extensão `health_check`.
-- `examples/docker-compose/` — ambiente de teste mínimo (só o Collector), parametrizado por `.env`.
+- `infra/collector/otelcol-config.yaml` — Collector config: OTLP receivers (gRPC + HTTP), `resource`/`batch` processors, `otlphttp` exporter to Dynatrace, `health_check` extension.
+- `examples/docker-compose/` — minimal test environment (Collector only), parameterized via `.env`.
 
-## Requisitos
+## Requirements
 
 - Docker + Docker Compose.
-- Um tenant **Dynatrace** (SaaS ou Managed).
-- Um **API Token** com scopes de **ingest**: `metrics.ingest`, `logs.ingest`,
-  `openTelemetryTrace.ingest`. (São diferentes dos scopes de leitura `*.read`.)
+- A Dynatrace tenant (SaaS or Managed).
+- An API Token with ingest scopes: `metrics.ingest`, `logs.ingest`, `openTelemetryTrace.ingest`. (These are different from the `*.read` scopes.)
 
 ## Quickstart
 
 ```bash
 cd examples/docker-compose
 
-# 1. Configurar credenciais (sem tokens no git — .env é ignorado)
+# 1. Configure credentials (no tokens in git — .env is ignored)
 cp .env.example .env
-#    editar .env: DT_OTLP_ENDPOINT, DT_API_TOKEN (+ opcional DEPLOYMENT_ENVIRONMENT)
+#    edit .env: DT_OTLP_ENDPOINT, DT_API_TOKEN (+ optional DEPLOYMENT_ENVIRONMENT)
 
-# 2. Subir o Collector
+# 2. Start the Collector
 docker compose up -d
 
-# 3. Verificar saúde e logs
+# 3. Check health and logs
 curl -sf http://localhost:13133 && echo " OK"
 docker compose logs -f otel-collector
 ```
 
-Apontar qualquer app OTel para o Collector:
+Point any OTel‑instrumented app to the Collector:
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # ou :4317 para gRPC
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # or :4317 for gRPC
 ```
 
-Portas expostas: **4317** (OTLP gRPC), **4318** (OTLP HTTP), **13133** (health_check).
+Exposed ports: 4317 (OTLP gRPC), 4318 (OTLP HTTP), 13133 (health_check).
 
-Confirmar depois a ingestão no Dynatrace (Distributed Traces / Metrics do teu env-id). O resource
-attribute `deployment.environment` reflete o valor de `DEPLOYMENT_ENVIRONMENT`.
+Then confirm ingestion in Dynatrace (Distributed Traces / Metrics for your environment).
+The deployment.environment resource attribute reflects the value of DEPLOYMENT_ENVIRONMENT.
 
-## Notas
+## Notes
 
-- `DT_OTLP_ENDPOINT` deve terminar em `/api/v2/otlp` — o exporter `otlphttp` acrescenta
-  `/v1/traces`, `/v1/metrics`, `/v1/logs`.
-- Auth Dynatrace usa o header `Authorization: Api-Token <token>`.
-- O config inclui um exporter `debug` além do `otlphttp`, útil para inspecionar o pipeline
-  localmente; podes removê-lo em produção.
+- `DT_OTLP_ENDPOINT` must end with `/api/v2/otlp` — the `otlphttp` exporter appends `/v1/traces`, `/v1/metrics`, `/v1/logs`.
+- Dynatrace auth uses the `Authorization: Api-Token <token>` header.
+- The config includes a `debug` exporter in addition to `otlphttp`, useful for inspecting the pipeline locally; you can remove it in production.
+
+For troubleshooting, see docs/troubleshooting.md.
