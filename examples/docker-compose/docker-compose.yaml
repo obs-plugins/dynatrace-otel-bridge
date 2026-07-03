@@ -17,3 +17,13 @@ services:
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
       - "13133:13133"   # health_check (opcional)
+    networks:
+      - dify-otel-net
+
+networks:
+  # Rede nomeada partilhada com a stack Dify (ver
+  # docker-compose.override.dify-example.yaml, na raiz do repo), para que os
+  # serviços api/worker do Dify consigam resolver "otel-collector" por nome
+  # sem fundir as duas stacks num único projeto compose.
+  dify-otel-net:
+    name: dify-otel-net
