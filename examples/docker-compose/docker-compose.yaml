@@ -1,7 +1,7 @@
 services:
   otel-collector:
-    # Fixa uma tag concreta para reprodutibilidade — bump conforme necessário.
-    image: otel/opentelemetry-collector-contrib:0.116.0
+    # Imagem oficial Dynatrace, validada em produção (tenant SaaS).
+    image: dynatrace/dynatrace-otel-collector:latest
     container_name: otel-collector
     restart: unless-stopped
     # Carrega DT_OTLP_ENDPOINT, DT_API_TOKEN e DEPLOYMENT_ENVIRONMENT para dentro
