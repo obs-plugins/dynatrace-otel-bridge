@@ -182,6 +182,20 @@ Confirm that HTTPS egress is not blocked by a proxy or firewall.
 
 Note: the `otlphttp` exporter retries with backoff — transient 5xx errors may recover on their own; 4xx marked as permanent will not recover and data is dropped.
 
+### Partial success / dropped_data_points on metrics export
+
+#### Symptom
+
+Logs mostram "Partial success response" com `dropped_data_points > 0`, e mensagens tipo "Unsupported metric: 'X' - Reason: UNSUPPORTED_METRIC_TYPE_CUMULATIVE_HISTOGRAM" ou "..._MONOTONIC_CUMULATIVE_SUM". Traces/logs continuam a funcionar; só métricas específicas são descartadas.
+
+#### Possible causes
+
+- Dynatrace exige delta temporality para métricas ingeridas via OTLP; o SDK OTel (a maioria das linguagens, incluindo Python) envia cumulative temporality por omissão.
+
+#### How to check & fix
+
+Confirmar que o processor `cumulativetodelta` está presente no pipeline de métricas, antes do `batch` (já incluído por omissão neste repo desde 2026-07-03). Documentação oficial: https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/configuration
+
 ## Collector healthy, Dynatrace OK, but no new data arrives
 
 ### Symptom

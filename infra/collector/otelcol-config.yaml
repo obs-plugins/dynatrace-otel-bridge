@@ -12,6 +12,7 @@ processors:
       - key: deployment.environment
         value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: upsert
+  cumulativetodelta: {}
   batch: {}
 
 exporters:
@@ -37,7 +38,7 @@ service:
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
-      processors: [resource, batch]
+      processors: [resource, cumulativetodelta, batch]
       exporters: [otlphttp/dynatrace, debug]
     logs:
       receivers: [otlp]
