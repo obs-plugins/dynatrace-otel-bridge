@@ -196,6 +196,8 @@ Logs mostram "Partial success response" com `dropped_data_points > 0`, e mensage
 
 Confirmar que o processor `cumulativetodelta` está presente no pipeline de métricas, antes do `batch` (já incluído por omissão neste repo desde 2026-07-03). Documentação oficial: https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/configuration
 
+Note: after restarting the collector, it's expected to see ONE occurrence of this warning on the first metrics export cycle — the cumulativetodelta processor has no baseline yet to compute a delta from. If the warning does not repeat on subsequent cycles (~30-60s apart), the fix is working correctly.
+
 ## Collector healthy, Dynatrace OK, but no new data arrives
 
 ### Symptom
