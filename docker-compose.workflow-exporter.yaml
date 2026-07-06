@@ -1,0 +1,29 @@
+services:
+  dify-workflow-otel-exporter:
+    build:
+      context: ./exporter
+    container_name: dify-workflow-otel-exporter
+    restart: unless-stopped
+    environment:
+      # Internal Dify API URL reachable on the shared Docker network.
+      # Keep this as the API root; incoming paths such as /v1/workflows/run
+      # are appended by the exporter.
+      DIFY_API_BASE_URL: http://api:5001
+
+      # Export spans to the collector already defined in this repo.
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_SERVICE_NAME: dify-workflow-otel-exporter
+
+      # Keep prompts/outputs out of span attributes by default.
+      # Set to "true" only after reviewing privacy/security requirements.
+      DIFY_OTEL_CAPTURE_CONTENT: "false"
+    ports:
+      - "8088:8080"
+    networks:
+      - dify-otel-net
+
+networks:
+  dify-otel-net:
+    external: true
+    name: dify-otel-net

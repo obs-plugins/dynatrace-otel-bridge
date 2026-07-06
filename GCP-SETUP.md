@@ -28,6 +28,7 @@ gcloud compute instances create <INSTANCE_NAME> \
 | `22` (SSH)             | Restrict to admin IP(s)  | VM access. |
 | `80`, `443`            | Public (`0.0.0.0/0`)     | Dify web/nginx (HTTP/HTTPS). |
 | `4317`, `4318`, `13133`| **Not exposed externally**| OTel Collector (gRPC, HTTP, health check). Only needed for container-to-container traffic on `dify-otel-net`; do not create a GCP firewall rule allowing external ingress to these ports. |
+| `8088`                 | **Not exposed externally by default** | Local test port for the Dify workflow telemetry exporter. If you make this a real API entry point, put it behind your normal HTTPS/reverse-proxy/auth controls instead of opening it directly. |
 
 ```bash
 gcloud compute firewall-rules create allow-http-https \
@@ -41,11 +42,11 @@ gcloud compute firewall-rules create allow-ssh-admin \
   --source-ranges=<ADMIN_IP>/32
 ```
 
-Do **not** create a firewall rule for `4317`/`4318`/`13133`. GCP firewalls
+Do **not** create a firewall rule for `4317`/`4318`/`13133` or `8088`. GCP firewalls
 deny inbound traffic by default, so simply not opening these ports keeps
-the Collector unreachable from the internet — even though
-`examples/docker-compose/docker-compose.yaml` publishes them to the host
-for local `curl`/debugging convenience.
+the Collector and workflow exporter unreachable from the internet — even
+though the compose files publish them to the host for local `curl`/debugging
+convenience.
 
 ## Install Docker, Compose, and git
 

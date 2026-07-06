@@ -228,6 +228,52 @@ In docker‑compose: confirm that app and Collector share the same network and t
 
 Confirm the app is actually getting traffic — without activity, there is no telemetry to send.
 
+## Dify workflow exporter is healthy, but node spans do not appear
+
+### Symptom
+
+`curl http://localhost:8088/healthz` works, workflow calls still return Dify
+responses, but Dynatrace does not show workflow node spans.
+
+### Possible causes
+
+- The client is still calling Dify directly instead of the exporter on port `8088`.
+- The workflow is executed with `response_mode=blocking`. Dify only exposes
+  node-level events during streaming/resume event flows.
+- The exporter cannot reach the Dify API service on `http://api:5001`.
+- The exporter cannot reach `otel-collector:4318`.
+- The Dify response stream does not include `node_started` / `node_finished`
+  events for the path being called.
+
+### How to check & fix
+
+Confirm the exporter can reach Dify and the collector on the shared network:
+
+```bash
+docker compose -f docker-compose.workflow-exporter.yaml exec dify-workflow-otel-exporter python -c "import socket; print(socket.gethostbyname('api')); print(socket.gethostbyname('otel-collector'))"
+```
+
+Call the exporter with streaming mode:
+
+```bash
+curl --request POST \
+  --url http://localhost:8088/v1/workflows/run \
+  --header 'Authorization: Bearer <dify-app-api-key>' \
+  --header 'Content-Type: application/json' \
+  --data '{"inputs":{},"response_mode":"streaming","user":"otel-test"}'
+```
+
+Then check exporter and collector logs:
+
+```bash
+docker compose -f docker-compose.workflow-exporter.yaml logs --tail 100 dify-workflow-otel-exporter
+cd examples/docker-compose
+docker compose logs --tail 100 otel-collector
+```
+
+If the same workflow call is sent directly to Dify, bypassing port `8088`,
+this exporter cannot observe it.
+
 ## Dify: web (Next.js) returns 502 on `/`
 
 ### Symptom
