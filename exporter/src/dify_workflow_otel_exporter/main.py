@@ -15,7 +15,7 @@ from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
 
@@ -26,6 +26,7 @@ logger = logging.getLogger("dify-workflow-otel-exporter")
 DIFY_API_BASE_URL = os.getenv("DIFY_API_BASE_URL", "http://api:5001").rstrip("/")
 SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "dify-workflow-otel-exporter")
 CAPTURE_CONTENT = os.getenv("DIFY_OTEL_CAPTURE_CONTENT", "false").lower() == "true"
+CONSOLE_EXPORT = os.getenv("DIFY_OTEL_CONSOLE_EXPORT", "false").lower() == "true"
 MAX_ATTRIBUTE_VALUE_LENGTH = int(os.getenv("DIFY_OTEL_MAX_ATTRIBUTE_VALUE_LENGTH", "4096"))
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("DIFY_OTEL_REQUEST_TIMEOUT_SECONDS", "30"))
 
@@ -46,7 +47,10 @@ HOP_BY_HOP_HEADERS = {
 def configure_tracing() -> trace.Tracer:
     resource = Resource.create({"service.name": SERVICE_NAME})
     provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    if CONSOLE_EXPORT:
+        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or not CONSOLE_EXPORT:
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)
     return trace.get_tracer(__name__)
 
