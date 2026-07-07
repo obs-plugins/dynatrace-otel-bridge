@@ -311,12 +311,49 @@ class DifyWorkflowTrace:
             _set_attr(span, key, value)
         _set_content_attrs(span, "dify.node.inputs", data.get("inputs"))
         _set_content_attrs(span, "dify.node.outputs", data.get("outputs"))
+        if data.get("node_type") == "llm":
+            self._apply_llm_genai_attrs(span, data)
         span.set_status(_status_code(data.get("status"), data.get("error")))
         span.end()
 
         for key, value in list(self.node_spans.items()):
             if value is span:
                 self.node_spans.pop(key, None)
+
+    def _apply_llm_genai_attrs(self, span: Span, data: dict[str, Any]) -> None:
+        process_data = data.get("process_data")
+        process_data = process_data if isinstance(process_data, dict) else {}
+        outputs = data.get("outputs")
+        outputs = outputs if isinstance(outputs, dict) else {}
+        usage = process_data.get("usage") or outputs.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+
+        operation_name = process_data.get("model_mode") or "chat"
+        model_name = process_data.get("model_name")
+        model_provider = process_data.get("model_provider")
+        provider_name = model_provider.rsplit("/", 1)[-1] if isinstance(model_provider, str) else None
+        finish_reason = process_data.get("finish_reason")
+
+        _set_attr(span, "gen_ai.operation.name", operation_name)
+        _set_attr(span, "gen_ai.request.model", model_name)
+        _set_attr(span, "gen_ai.provider.name", provider_name)
+        _set_attr(span, "gen_ai.usage.input_tokens", usage.get("prompt_tokens"))
+        _set_attr(span, "gen_ai.usage.output_tokens", usage.get("completion_tokens"))
+        if finish_reason is not None:
+            _set_attr(span, "gen_ai.response.finish_reasons", [finish_reason])
+
+        if model_name:
+            span.update_name(f"{operation_name} {model_name}")
+
+        if CAPTURE_CONTENT:
+            _set_attr(span, "gen_ai.input.messages", process_data.get("prompts"))
+            _set_attr(span, "gen_ai.output.messages", outputs.get("text"))
+
+        _set_attr(span, "dify.gen_ai.total_tokens", usage.get("total_tokens"))
+        _set_attr(span, "dify.gen_ai.total_price", usage.get("total_price"))
+        _set_attr(span, "dify.gen_ai.currency", usage.get("currency"))
+        _set_attr(span, "dify.gen_ai.time_to_first_token", usage.get("time_to_first_token"))
+        _set_attr(span, "dify.gen_ai.provider_raw", model_provider)
 
     def _finish_workflow(self, span: Span, data: dict[str, Any]) -> None:
         self._apply_workflow_attrs(span, data)
