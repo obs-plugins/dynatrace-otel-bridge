@@ -18,6 +18,9 @@ services:
       # Keep prompts/outputs out of span attributes by default.
       # Set to "true" only after reviewing privacy/security requirements.
       DIFY_OTEL_CAPTURE_CONTENT: "false"
+
+      # Also print spans to stdout (in addition to OTLP) for local debugging.
+      DIFY_OTEL_CONSOLE_EXPORT: ${DIFY_OTEL_CONSOLE_EXPORT:-false}
     ports:
       - "8088:8080"
     networks:
