@@ -24,6 +24,22 @@ processors:
         statements:
           - set(attributes["gen_ai.response.finish_reasons"], [attributes["gen_ai.response.finish_reason"]]) where attributes["gen_ai.response.finish_reason"] != nil
           - delete_key(attributes, "gen_ai.response.finish_reason") where attributes["gen_ai.response.finish_reason"] != nil
+  # Dify nativo (ENABLE_OTEL) emite estes 4 atributos sob o namespace gen_ai.*,
+  # mas não fazem parte da OTel GenAI Semantic Convention — são específicos do
+  # Dify. Move-os para o namespace proprietário dify.*, preservando o valor,
+  # e remove o original para não duplicar o dado.
+  transform/genai_dify_namespace_cleanup:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["dify.span.kind"], attributes["gen_ai.span.kind"]) where attributes["gen_ai.span.kind"] != nil
+          - delete_key(attributes, "gen_ai.span.kind") where attributes["gen_ai.span.kind"] != nil
+          - set(attributes["dify.framework"], attributes["gen_ai.framework"]) where attributes["gen_ai.framework"] != nil
+          - delete_key(attributes, "gen_ai.framework") where attributes["gen_ai.framework"] != nil
+          - set(attributes["dify.user_id"], attributes["gen_ai.user.id"]) where attributes["gen_ai.user.id"] != nil
+          - delete_key(attributes, "gen_ai.user.id") where attributes["gen_ai.user.id"] != nil
+          - set(attributes["dify.time_to_first_token"], attributes["gen_ai.user.time_to_first_token"]) where attributes["gen_ai.user.time_to_first_token"] != nil
+          - delete_key(attributes, "gen_ai.user.time_to_first_token") where attributes["gen_ai.user.time_to_first_token"] != nil
   batch: {}
 
 exporters:
@@ -45,7 +61,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, transform/genai_finish_reasons, batch]
+      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
