@@ -23,6 +23,9 @@ services:
     # escutar em todas as interfaces, independentemente da rede/hostname.
     environment:
       HOSTNAME: "0.0.0.0"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "dify-web"
     # default + ssrf_proxy_network mantêm as redes originais do web no
     # compose da Dify; dify-otel-net não é estritamente necessária aqui (o
     # web não fala com o collector), mas é a configuração validada em
@@ -33,10 +36,35 @@ services:
       - dify-otel-net
 
   api:
+    environment:
+      ENABLE_OTEL: "true"
+      OTLP_BASE_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "dify-api"
+      OTEL_SAMPLING_RATE: "1.0"
     networks:
       - dify-otel-net
 
   worker:
+    environment:
+      ENABLE_OTEL: "true"
+      OTLP_BASE_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "dify-worker"
+      OTEL_SAMPLING_RATE: "1.0"
+    networks:
+      - dify-otel-net
+
+  worker_beat:
+    environment:
+      ENABLE_OTEL: "true"
+      OTLP_BASE_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+      OTEL_SERVICE_NAME: "dify-worker-beat"
+      OTEL_SAMPLING_RATE: "1.0"
     networks:
       - dify-otel-net
 

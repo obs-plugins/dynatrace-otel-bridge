@@ -54,6 +54,16 @@ on the VM (its `docker/` directory, with `docker-compose.yaml` and `.env`).
    docker compose up -d
    ```
 
+5. Start the Dify workflow telemetry exporter from this repo:
+
+   ```bash
+   cd <path-to-this-repo>
+   docker compose -f docker-compose.workflow-exporter.yaml up -d --build
+   ```
+
+   The exporter listens on host port `8088` and forwards incoming Dify API
+   calls to `http://api:5001` over `dify-otel-net`.
+
 ## 4. Quick checks
 
 Run these from the VM after step 3.
@@ -91,6 +101,24 @@ curl -sf http://localhost:13133 && echo " OK"
 docker compose logs --tail 100 otel-collector | grep -i "Exporting failed"
 ```
 No output = no export failures. If this prints lines, see step 5.
+
+**Workflow exporter is reachable:**
+```bash
+curl -sf http://localhost:8088/healthz
+```
+
+**Node-level telemetry path is used:**
+Call workflows through the exporter, not directly through Dify:
+```bash
+curl --request POST \
+  --url http://localhost:8088/v1/workflows/run \
+  --header 'Authorization: Bearer <dify-app-api-key>' \
+  --header 'Content-Type: application/json' \
+  --data '{"inputs":{},"response_mode":"streaming","user":"otel-test"}'
+```
+
+Use `response_mode=streaming` for workflow/node spans. Blocking calls can only
+produce a run-level span.
 
 ## 5. Troubleshooting
 
