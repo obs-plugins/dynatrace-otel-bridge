@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -32,6 +33,8 @@ CAPTURE_CONTENT = os.getenv("DIFY_OTEL_CAPTURE_CONTENT", "false").lower() == "tr
 CONSOLE_EXPORT = os.getenv("DIFY_OTEL_CONSOLE_EXPORT", "false").lower() == "true"
 MAX_ATTRIBUTE_VALUE_LENGTH = int(os.getenv("DIFY_OTEL_MAX_ATTRIBUTE_VALUE_LENGTH", "4096"))
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("DIFY_OTEL_REQUEST_TIMEOUT_SECONDS", "30"))
+APP_NAME_FETCH_TIMEOUT_SECONDS = 2.0
+APP_NAME_CACHE_TTL_SECONDS = 300.0
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -148,6 +151,37 @@ def _record_token_usage_metric(
         logger.warning("Failed to record gen_ai.client.token.usage metric", exc_info=True)
 
 
+# Cache key is a SHA-256 hash of the auth header, never the raw token.
+_APP_NAME_CACHE: dict[str, tuple[str | None, float]] = {}
+
+
+async def _fetch_app_name(auth_header: str, client: httpx.AsyncClient) -> str | None:
+    try:
+        response = await client.get(
+            f"{DIFY_API_BASE_URL}/v1/info",
+            headers={"Authorization": auth_header},
+            timeout=APP_NAME_FETCH_TIMEOUT_SECONDS,
+        )
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        name = payload.get("name") if isinstance(payload, dict) else None
+        return name or None
+    except Exception:
+        logger.debug("Failed to fetch Dify app name from /v1/info", exc_info=True)
+        return None
+
+
+async def _get_app_name(auth_header: str, client: httpx.AsyncClient) -> str | None:
+    cache_key = hashlib.sha256(auth_header.encode("utf-8")).hexdigest()
+    cached = _APP_NAME_CACHE.get(cache_key)
+    if cached is not None and (time.time() - cached[1]) < APP_NAME_CACHE_TTL_SECONDS:
+        return cached[0]
+    name = await _fetch_app_name(auth_header, client)
+    _APP_NAME_CACHE[cache_key] = (name, time.time())
+    return name
+
+
 def _status_code(status: str | None, error: Any = None) -> Status:
     if error:
         return Status(StatusCode.ERROR, str(error))
@@ -198,9 +232,10 @@ def _is_streaming_request(body: bytes, request: Request) -> bool:
 
 
 class DifyWorkflowTrace:
-    def __init__(self, path: str, method: str):
+    def __init__(self, path: str, method: str, app_name: str | None = None):
         self.path = path
         self.method = method
+        self.app_name = app_name
         self.root_span: Span | None = None
         self.node_spans: dict[str, Span] = {}
         self.started_at = time.time()
@@ -217,6 +252,7 @@ class DifyWorkflowTrace:
             "dify.operation": "workflow",
             "dify.workflow_run_id": workflow_run_id,
             "dify.workflow_id": workflow_id,
+            "dify.workflow.name": self.app_name,
             "dify.task_id": payload.get("task_id"),
             "http.request.method": self.method,
             "url.path": self.path,
@@ -460,10 +496,17 @@ async def proxy(full_path: str, request: Request) -> Response:
     target_url = _target_url(request)
     headers = _filtered_request_headers(request)
     client: httpx.AsyncClient = request.app.state.client
-    workflow_trace = DifyWorkflowTrace(path=request.url.path, method=request.method)
 
     should_trace = _is_workflow_path(request.url.path)
     should_stream = should_trace and _is_streaming_request(body, request)
+
+    app_name = None
+    if should_trace:
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            app_name = await _get_app_name(auth_header, client)
+
+    workflow_trace = DifyWorkflowTrace(path=request.url.path, method=request.method, app_name=app_name)
 
     if should_stream:
         upstream_request = client.build_request(
