@@ -11,8 +11,11 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from opentelemetry import trace
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
@@ -55,7 +58,30 @@ def configure_tracing() -> trace.Tracer:
     return trace.get_tracer(__name__)
 
 
+def configure_metrics() -> metrics.Meter:
+    resource = Resource.create({"service.name": SERVICE_NAME})
+    readers = []
+    if CONSOLE_EXPORT:
+        readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or not CONSOLE_EXPORT:
+        readers.append(PeriodicExportingMetricReader(OTLPMetricExporter()))
+    provider = MeterProvider(resource=resource, metric_readers=readers)
+    metrics.set_meter_provider(provider)
+    return metrics.get_meter("dify_workflow_otel_exporter")
+
+
 TRACER = configure_tracing()
+
+try:
+    METER = configure_metrics()
+    TOKEN_USAGE_HISTOGRAM = METER.create_histogram(
+        name="gen_ai.client.token.usage",
+        unit="{token}",
+        description="Number of input and output tokens used per GenAI request",
+    )
+except Exception:
+    logger.warning("Failed to configure GenAI token usage metrics", exc_info=True)
+    TOKEN_USAGE_HISTOGRAM = None
 
 
 def _truncate(value: str) -> str:
@@ -93,6 +119,33 @@ def _set_content_attrs(span: Span, prefix: str, value: Any) -> None:
         _set_attr(span, f"{prefix}.size", len(value))
     else:
         _set_attr(span, f"{prefix}.type", type(value).__name__)
+
+
+def _record_token_usage_metric(
+    operation_name: str,
+    provider_name: str | None,
+    model_name: str | None,
+    input_tokens: Any,
+    output_tokens: Any,
+) -> None:
+    if TOKEN_USAGE_HISTOGRAM is None:
+        return
+    base_attributes = {
+        key: value
+        for key, value in {
+            "gen_ai.operation.name": operation_name,
+            "gen_ai.provider.name": provider_name,
+            "gen_ai.request.model": model_name,
+        }.items()
+        if value is not None
+    }
+    try:
+        if input_tokens:
+            TOKEN_USAGE_HISTOGRAM.record(input_tokens, {**base_attributes, "gen_ai.token.type": "input"})
+        if output_tokens:
+            TOKEN_USAGE_HISTOGRAM.record(output_tokens, {**base_attributes, "gen_ai.token.type": "output"})
+    except Exception:
+        logger.warning("Failed to record gen_ai.client.token.usage metric", exc_info=True)
 
 
 def _status_code(status: str | None, error: Any = None) -> Status:
@@ -337,12 +390,14 @@ class DifyWorkflowTrace:
         model_provider = process_data.get("model_provider")
         provider_name = model_provider.rsplit("/", 1)[-1] if isinstance(model_provider, str) else None
         finish_reason = process_data.get("finish_reason")
+        input_tokens = usage.get("prompt_tokens")
+        output_tokens = usage.get("completion_tokens")
 
         _set_attr(span, "gen_ai.operation.name", operation_name)
         _set_attr(span, "gen_ai.request.model", model_name)
         _set_attr(span, "gen_ai.provider.name", provider_name)
-        _set_attr(span, "gen_ai.usage.input_tokens", usage.get("prompt_tokens"))
-        _set_attr(span, "gen_ai.usage.output_tokens", usage.get("completion_tokens"))
+        _set_attr(span, "gen_ai.usage.input_tokens", input_tokens)
+        _set_attr(span, "gen_ai.usage.output_tokens", output_tokens)
         if finish_reason is not None:
             _set_attr(span, "gen_ai.response.finish_reasons", [finish_reason])
 
@@ -358,6 +413,8 @@ class DifyWorkflowTrace:
         _set_attr(span, "dify.gen_ai.currency", usage.get("currency"))
         _set_attr(span, "dify.gen_ai.time_to_first_token", usage.get("time_to_first_token"))
         _set_attr(span, "dify.gen_ai.provider_raw", model_provider)
+
+        _record_token_usage_metric(operation_name, provider_name, model_name, input_tokens, output_tokens)
 
     def _finish_workflow(self, span: Span, data: dict[str, Any]) -> None:
         self._apply_workflow_attrs(span, data)
