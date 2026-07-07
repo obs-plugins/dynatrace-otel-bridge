@@ -13,6 +13,17 @@ processors:
         value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: upsert
   cumulativetodelta: {}
+  # Dify nativo (ENABLE_OTEL) emite gen_ai.response.finish_reason como string
+  # singular; a convenção oficial é gen_ai.response.finish_reasons (array).
+  # Migra o valor para o atributo em array e remove o singular, para
+  # conformidade com as OTel GenAI Semantic Conventions v1.37. Só atua nos
+  # spans onde o atributo singular existe.
+  transform/genai_finish_reasons:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["gen_ai.response.finish_reasons"], [attributes["gen_ai.response.finish_reason"]]) where attributes["gen_ai.response.finish_reason"] != nil
+          - delete_key(attributes, "gen_ai.response.finish_reason") where attributes["gen_ai.response.finish_reason"] != nil
   batch: {}
 
 exporters:
@@ -34,7 +45,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, batch]
+      processors: [resource, transform/genai_finish_reasons, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
