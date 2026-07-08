@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -11,11 +12,14 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from opentelemetry import trace
+from opentelemetry import metrics, trace
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import ConsoleMetricExporter, PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter, SimpleSpanProcessor
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
 
@@ -26,8 +30,11 @@ logger = logging.getLogger("dify-workflow-otel-exporter")
 DIFY_API_BASE_URL = os.getenv("DIFY_API_BASE_URL", "http://api:5001").rstrip("/")
 SERVICE_NAME = os.getenv("OTEL_SERVICE_NAME", "dify-workflow-otel-exporter")
 CAPTURE_CONTENT = os.getenv("DIFY_OTEL_CAPTURE_CONTENT", "false").lower() == "true"
+CONSOLE_EXPORT = os.getenv("DIFY_OTEL_CONSOLE_EXPORT", "false").lower() == "true"
 MAX_ATTRIBUTE_VALUE_LENGTH = int(os.getenv("DIFY_OTEL_MAX_ATTRIBUTE_VALUE_LENGTH", "4096"))
 REQUEST_TIMEOUT_SECONDS = float(os.getenv("DIFY_OTEL_REQUEST_TIMEOUT_SECONDS", "30"))
+APP_NAME_FETCH_TIMEOUT_SECONDS = 2.0
+APP_NAME_CACHE_TTL_SECONDS = 300.0
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -46,12 +53,38 @@ HOP_BY_HOP_HEADERS = {
 def configure_tracing() -> trace.Tracer:
     resource = Resource.create({"service.name": SERVICE_NAME})
     provider = TracerProvider(resource=resource)
-    provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+    if CONSOLE_EXPORT:
+        provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or not CONSOLE_EXPORT:
+        provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
     trace.set_tracer_provider(provider)
     return trace.get_tracer(__name__)
 
 
+def configure_metrics() -> metrics.Meter:
+    resource = Resource.create({"service.name": SERVICE_NAME})
+    readers = []
+    if CONSOLE_EXPORT:
+        readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
+    if os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or not CONSOLE_EXPORT:
+        readers.append(PeriodicExportingMetricReader(OTLPMetricExporter()))
+    provider = MeterProvider(resource=resource, metric_readers=readers)
+    metrics.set_meter_provider(provider)
+    return metrics.get_meter("dify_workflow_otel_exporter")
+
+
 TRACER = configure_tracing()
+
+try:
+    METER = configure_metrics()
+    TOKEN_USAGE_HISTOGRAM = METER.create_histogram(
+        name="gen_ai.client.token.usage",
+        unit="{token}",
+        description="Number of input and output tokens used per GenAI request",
+    )
+except Exception:
+    logger.warning("Failed to configure GenAI token usage metrics", exc_info=True)
+    TOKEN_USAGE_HISTOGRAM = None
 
 
 def _truncate(value: str) -> str:
@@ -89,6 +122,64 @@ def _set_content_attrs(span: Span, prefix: str, value: Any) -> None:
         _set_attr(span, f"{prefix}.size", len(value))
     else:
         _set_attr(span, f"{prefix}.type", type(value).__name__)
+
+
+def _record_token_usage_metric(
+    operation_name: str,
+    provider_name: str | None,
+    model_name: str | None,
+    input_tokens: Any,
+    output_tokens: Any,
+) -> None:
+    if TOKEN_USAGE_HISTOGRAM is None:
+        return
+    base_attributes = {
+        key: value
+        for key, value in {
+            "gen_ai.operation.name": operation_name,
+            "gen_ai.provider.name": provider_name,
+            "gen_ai.request.model": model_name,
+        }.items()
+        if value is not None
+    }
+    try:
+        if input_tokens:
+            TOKEN_USAGE_HISTOGRAM.record(input_tokens, {**base_attributes, "gen_ai.token.type": "input"})
+        if output_tokens:
+            TOKEN_USAGE_HISTOGRAM.record(output_tokens, {**base_attributes, "gen_ai.token.type": "output"})
+    except Exception:
+        logger.warning("Failed to record gen_ai.client.token.usage metric", exc_info=True)
+
+
+# Cache key is a SHA-256 hash of the auth header, never the raw token.
+_APP_NAME_CACHE: dict[str, tuple[str | None, float]] = {}
+
+
+async def _fetch_app_name(auth_header: str, client: httpx.AsyncClient) -> str | None:
+    try:
+        response = await client.get(
+            f"{DIFY_API_BASE_URL}/v1/info",
+            headers={"Authorization": auth_header},
+            timeout=APP_NAME_FETCH_TIMEOUT_SECONDS,
+        )
+        if response.status_code != 200:
+            return None
+        payload = response.json()
+        name = payload.get("name") if isinstance(payload, dict) else None
+        return name or None
+    except Exception:
+        logger.debug("Failed to fetch Dify app name from /v1/info", exc_info=True)
+        return None
+
+
+async def _get_app_name(auth_header: str, client: httpx.AsyncClient) -> str | None:
+    cache_key = hashlib.sha256(auth_header.encode("utf-8")).hexdigest()
+    cached = _APP_NAME_CACHE.get(cache_key)
+    if cached is not None and (time.time() - cached[1]) < APP_NAME_CACHE_TTL_SECONDS:
+        return cached[0]
+    name = await _fetch_app_name(auth_header, client)
+    _APP_NAME_CACHE[cache_key] = (name, time.time())
+    return name
 
 
 def _status_code(status: str | None, error: Any = None) -> Status:
@@ -141,9 +232,10 @@ def _is_streaming_request(body: bytes, request: Request) -> bool:
 
 
 class DifyWorkflowTrace:
-    def __init__(self, path: str, method: str):
+    def __init__(self, path: str, method: str, app_name: str | None = None):
         self.path = path
         self.method = method
+        self.app_name = app_name
         self.root_span: Span | None = None
         self.node_spans: dict[str, Span] = {}
         self.started_at = time.time()
@@ -160,6 +252,7 @@ class DifyWorkflowTrace:
             "dify.operation": "workflow",
             "dify.workflow_run_id": workflow_run_id,
             "dify.workflow_id": workflow_id,
+            "dify.workflow.name": self.app_name,
             "dify.task_id": payload.get("task_id"),
             "http.request.method": self.method,
             "url.path": self.path,
@@ -311,12 +404,53 @@ class DifyWorkflowTrace:
             _set_attr(span, key, value)
         _set_content_attrs(span, "dify.node.inputs", data.get("inputs"))
         _set_content_attrs(span, "dify.node.outputs", data.get("outputs"))
+        if data.get("node_type") == "llm":
+            self._apply_llm_genai_attrs(span, data)
         span.set_status(_status_code(data.get("status"), data.get("error")))
         span.end()
 
         for key, value in list(self.node_spans.items()):
             if value is span:
                 self.node_spans.pop(key, None)
+
+    def _apply_llm_genai_attrs(self, span: Span, data: dict[str, Any]) -> None:
+        process_data = data.get("process_data")
+        process_data = process_data if isinstance(process_data, dict) else {}
+        outputs = data.get("outputs")
+        outputs = outputs if isinstance(outputs, dict) else {}
+        usage = process_data.get("usage") or outputs.get("usage")
+        usage = usage if isinstance(usage, dict) else {}
+
+        operation_name = process_data.get("model_mode") or "chat"
+        model_name = process_data.get("model_name")
+        model_provider = process_data.get("model_provider")
+        provider_name = model_provider.rsplit("/", 1)[-1] if isinstance(model_provider, str) else None
+        finish_reason = process_data.get("finish_reason")
+        input_tokens = usage.get("prompt_tokens")
+        output_tokens = usage.get("completion_tokens")
+
+        _set_attr(span, "gen_ai.operation.name", operation_name)
+        _set_attr(span, "gen_ai.request.model", model_name)
+        _set_attr(span, "gen_ai.provider.name", provider_name)
+        _set_attr(span, "gen_ai.usage.input_tokens", input_tokens)
+        _set_attr(span, "gen_ai.usage.output_tokens", output_tokens)
+        if finish_reason is not None:
+            _set_attr(span, "gen_ai.response.finish_reasons", [finish_reason])
+
+        if model_name:
+            span.update_name(f"{operation_name} {model_name}")
+
+        if CAPTURE_CONTENT:
+            _set_attr(span, "gen_ai.input.messages", process_data.get("prompts"))
+            _set_attr(span, "gen_ai.output.messages", outputs.get("text"))
+
+        _set_attr(span, "dify.gen_ai.total_tokens", usage.get("total_tokens"))
+        _set_attr(span, "dify.gen_ai.total_price", usage.get("total_price"))
+        _set_attr(span, "dify.gen_ai.currency", usage.get("currency"))
+        _set_attr(span, "dify.gen_ai.time_to_first_token", usage.get("time_to_first_token"))
+        _set_attr(span, "dify.gen_ai.provider_raw", model_provider)
+
+        _record_token_usage_metric(operation_name, provider_name, model_name, input_tokens, output_tokens)
 
     def _finish_workflow(self, span: Span, data: dict[str, Any]) -> None:
         self._apply_workflow_attrs(span, data)
@@ -362,10 +496,17 @@ async def proxy(full_path: str, request: Request) -> Response:
     target_url = _target_url(request)
     headers = _filtered_request_headers(request)
     client: httpx.AsyncClient = request.app.state.client
-    workflow_trace = DifyWorkflowTrace(path=request.url.path, method=request.method)
 
     should_trace = _is_workflow_path(request.url.path)
     should_stream = should_trace and _is_streaming_request(body, request)
+
+    app_name = None
+    if should_trace:
+        auth_header = request.headers.get("authorization")
+        if auth_header:
+            app_name = await _get_app_name(auth_header, client)
+
+    workflow_trace = DifyWorkflowTrace(path=request.url.path, method=request.method, app_name=app_name)
 
     if should_stream:
         upstream_request = client.build_request(
