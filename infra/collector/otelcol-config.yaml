@@ -97,6 +97,21 @@ processors:
       - context: span
         statements:
           - replace_pattern(attributes["gen_ai.provider.name"], "^.*/", "") where attributes["gen_ai.provider.name"] != nil
+  # gen_ai.operation.name: o Dify nativo define a constante mas NUNCA a emite
+  # (o parser LLM seta model/provider/tokens/finish_reason mas não operation).
+  # A app AI Observability do Dynatrace classifica um span como "operação de
+  # modelo" com base em gen_ai.operation.name; sem ele, o modelo aparece na
+  # faceta mas NÃO é contado (widget "Number of models" fica a 0). A spec
+  # oficial GenAI define "chat" como o valor well-known para uma interação de
+  # chat com um LLM. Estes spans têm gen_ai.request.model e são nós LLM, logo
+  # são inequivocamente operações de chat. Só setamos quando há request.model
+  # e ainda não existe operation.name (não sobrescrever se algum dia o Dify
+  # passar a emitir um valor próprio).
+  transform/genai_operation_name:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["gen_ai.operation.name"], "chat") where attributes["gen_ai.request.model"] != nil and attributes["gen_ai.operation.name"] == nil
   batch: {}
 
 exporters:
@@ -118,7 +133,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, batch]
+      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, transform/genai_operation_name, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
