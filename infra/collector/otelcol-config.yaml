@@ -13,6 +13,56 @@ processors:
         value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: upsert
   cumulativetodelta: {}
+  # Dify nativo (ENABLE_OTEL) emite gen_ai.response.finish_reason como string
+  # singular; a convenção oficial é gen_ai.response.finish_reasons (array).
+  # Migra o valor para o atributo em array e remove o singular, para
+  # conformidade com as OTel GenAI Semantic Conventions v1.37. Só atua nos
+  # spans onde o atributo singular existe.
+  transform/genai_finish_reasons:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["gen_ai.response.finish_reasons"], [attributes["gen_ai.response.finish_reason"]]) where attributes["gen_ai.response.finish_reason"] != nil
+          - delete_key(attributes, "gen_ai.response.finish_reason") where attributes["gen_ai.response.finish_reason"] != nil
+  # Dify nativo (ENABLE_OTEL) emite estes 4 atributos sob o namespace gen_ai.*,
+  # mas não fazem parte da OTel GenAI Semantic Convention — são específicos do
+  # Dify. Move-os para o namespace proprietário dify.*, preservando o valor,
+  # e remove o original para não duplicar o dado.
+  transform/genai_dify_namespace_cleanup:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["dify.span.kind"], attributes["gen_ai.span.kind"]) where attributes["gen_ai.span.kind"] != nil
+          - delete_key(attributes, "gen_ai.span.kind") where attributes["gen_ai.span.kind"] != nil
+          - set(attributes["dify.framework"], attributes["gen_ai.framework"]) where attributes["gen_ai.framework"] != nil
+          - delete_key(attributes, "gen_ai.framework") where attributes["gen_ai.framework"] != nil
+          - set(attributes["dify.user_id"], attributes["gen_ai.user.id"]) where attributes["gen_ai.user.id"] != nil
+          - delete_key(attributes, "gen_ai.user.id") where attributes["gen_ai.user.id"] != nil
+          - set(attributes["dify.time_to_first_token"], attributes["gen_ai.user.time_to_first_token"]) where attributes["gen_ai.user.time_to_first_token"] != nil
+          - delete_key(attributes, "gen_ai.user.time_to_first_token") where attributes["gen_ai.user.time_to_first_token"] != nil
+  # Duas lógicas distintas neste processor:
+  # Lógica A (promoção condicional): gen_ai.prompt/gen_ai.completion são a
+  # versão legada do MESMO conceito que gen_ai.input.messages/output.messages.
+  # Se a versão nova ainda não existir, o valor legado é promovido para ela;
+  # em qualquer caso o campo legado é removido no final (nunca mantemos as
+  # duas versões do mesmo dado). A condição do delete_key roda depois do set,
+  # por isso cobre tanto "acabou de ser promovido" como "já existiam ambos".
+  # Lógica B (preservação sob namespace próprio): input.value/output.value são
+  # a convenção Arize/OpenInference de "chain I/O" genérico — um conceito
+  # DIFERENTE de gen_ai.input.messages/output.messages, não deve ser fundido
+  # com ele. Só é renomeado para dify.io.*, preservando o valor.
+  transform/genai_legacy_promotion:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["gen_ai.input.messages"], attributes["gen_ai.prompt"]) where attributes["gen_ai.input.messages"] == nil and attributes["gen_ai.prompt"] != nil
+          - delete_key(attributes, "gen_ai.prompt") where attributes["gen_ai.input.messages"] != nil and attributes["gen_ai.prompt"] != nil
+          - set(attributes["gen_ai.output.messages"], attributes["gen_ai.completion"]) where attributes["gen_ai.output.messages"] == nil and attributes["gen_ai.completion"] != nil
+          - delete_key(attributes, "gen_ai.completion") where attributes["gen_ai.output.messages"] != nil and attributes["gen_ai.completion"] != nil
+          - set(attributes["dify.io.input_value"], attributes["input.value"]) where attributes["input.value"] != nil
+          - delete_key(attributes, "input.value") where attributes["input.value"] != nil
+          - set(attributes["dify.io.output_value"], attributes["output.value"]) where attributes["output.value"] != nil
+          - delete_key(attributes, "output.value") where attributes["output.value"] != nil
   batch: {}
 
 exporters:
@@ -34,7 +84,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, batch]
+      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
