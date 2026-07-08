@@ -85,6 +85,18 @@ processors:
           - delete_key(attributes, "retrieval.query") where attributes["retrieval.query"] != nil
           - set(attributes["dify.retrieval.document"], attributes["retrieval.document"]) where attributes["retrieval.document"] != nil
           - delete_key(attributes, "retrieval.document") where attributes["retrieval.document"] != nil
+  # gen_ai.provider.name: o Dify nativo emite o valor CRU de model_provider,
+  # que para providers instalados via plugin tem a forma
+  # "{org}/{plugin}/{provider}" (ex.: "langgenius/groq/groq"). A convenção
+  # oficial OTel GenAI e a app AI Observability do Dynatrace esperam o nome
+  # limpo do provider ("groq", "openai", ...). Colapsamos para o último
+  # segmento do path removendo tudo até à última barra (greedy). Valores já
+  # limpos (sem barra) ficam inalterados. So corre quando o atributo existe.
+  transform/genai_provider_name_normalize:
+    trace_statements:
+      - context: span
+        statements:
+          - replace_pattern(attributes["gen_ai.provider.name"], "^.*/", "") where attributes["gen_ai.provider.name"] != nil
   batch: {}
 
 exporters:
@@ -106,7 +118,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, batch]
+      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
