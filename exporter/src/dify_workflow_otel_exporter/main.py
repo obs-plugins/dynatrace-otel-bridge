@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from opentelemetry import metrics, trace
+from opentelemetry import metrics, propagate, trace
 from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.metrics import MeterProvider
@@ -507,6 +507,10 @@ async def proxy(full_path: str, request: Request) -> Response:
             app_name = await _get_app_name(auth_header, client)
 
     workflow_trace = DifyWorkflowTrace(path=request.url.path, method=request.method, app_name=app_name)
+
+    if should_trace:
+        with trace.use_span(workflow_trace.ensure_root(), end_on_exit=False):
+            propagate.inject(headers)
 
     if should_stream:
         upstream_request = client.build_request(
