@@ -230,7 +230,7 @@ In docker‑compose: confirm that app and Collector share the same network and t
 
 Confirm the app is actually getting traffic — without activity, there is no telemetry to send.
 
-## Dify workflow exporter is healthy, but node spans do not appear
+## [LEGACY — Track B aposentado] Dify workflow exporter is healthy, but node spans do not appear
 
 ### Symptom
 
@@ -252,7 +252,7 @@ responses, but Dynatrace does not show workflow node spans.
 Confirm the exporter can reach Dify and the collector on the shared network:
 
 ```bash
-docker compose -f docker-compose.workflow-exporter.yaml exec dify-workflow-otel-exporter python -c "import socket; print(socket.gethostbyname('api')); print(socket.gethostbyname('otel-collector'))"
+docker compose -f legacy/docker-compose.workflow-exporter.yaml exec dify-workflow-otel-exporter python -c "import socket; print(socket.gethostbyname('api')); print(socket.gethostbyname('otel-collector'))"
 ```
 
 Call the exporter with streaming mode:
@@ -268,7 +268,7 @@ curl --request POST \
 Then check exporter and collector logs:
 
 ```bash
-docker compose -f docker-compose.workflow-exporter.yaml logs --tail 100 dify-workflow-otel-exporter
+docker compose -f legacy/docker-compose.workflow-exporter.yaml logs --tail 100 dify-workflow-otel-exporter
 cd examples/docker-compose
 docker compose logs --tail 100 otel-collector
 ```
