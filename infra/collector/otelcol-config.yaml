@@ -7,6 +7,23 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  # Descarta ruído de tráfego HTTP de consola/infra do Dify (spans como
+  # GET/POST /console/api/*, /health, /openapi.json, tentativas a /api/.env, etc.)
+  # que a auto-instrumentação HTTP do Dify emite para TODAS as rotas, não só as
+  # GenAI. Estes spans poluem a app AI Observability (ex.: "Invocation error
+  # count" inflacionado com 4xx de consola, enquanto o Failure rate real de
+  # operações GenAI é 0%) e aumentam volume ingerido (custo Grail).
+  # Discriminador (validado nos dados reais): spans de consola TÊM
+  # http.request.method (POST/GET); os spans que queremos manter — dify.workflow
+  # raiz e nós LLM — são internos e têm http.request.method == nil.
+  # Rede de segurança tripla: só descarta se tiver http.request.method E não
+  # tiver gen_ai.request.model E não tiver dify.workflow_id, para nunca apanhar
+  # por engano um span com sinal GenAI ou a âncora do workflow. Os spans de
+  # consola são folhas (não são pais de nós), logo descartá-los não orfana a trace.
+  filter/drop_dify_console_noise:
+    error_mode: ignore
+    trace_conditions:
+      - span.attributes["http.request.method"] != nil and span.attributes["gen_ai.request.model"] == nil and span.attributes["dify.workflow_id"] == nil
   resource:
     attributes:
       - key: deployment.environment
@@ -147,7 +164,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, transform/genai_operation_name, transform/genai_response_model, batch]
+      processors: [resource, filter/drop_dify_console_noise, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, transform/genai_operation_name, transform/genai_response_model, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
