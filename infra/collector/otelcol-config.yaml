@@ -112,6 +112,20 @@ processors:
       - context: span
         statements:
           - set(attributes["gen_ai.operation.name"], "chat") where attributes["gen_ai.request.model"] != nil and attributes["gen_ai.operation.name"] == nil
+  # gen_ai.response.model: o Dify nativo só emite gen_ai.request.model (o parser
+  # LLM escreve model_name apenas em REQUEST_MODEL; não existe RESPONSE_MODEL na
+  # semconv dele). A app AI Observability do Dynatrace conta "Number of models"
+  # com countDistinct(gen_ai.response.model) — logo, sem este campo, o widget
+  # fica a 0 mesmo com o modelo presente em request.model. No Dify o modelo é
+  # selecionado explicitamente no nó LLM, sem roteamento/fallback/aliasing, pelo
+  # que request.model e response.model são por construção o mesmo valor; copiar
+  # reflete a realidade. Só corre quando request.model existe e response.model
+  # ainda não foi definido.
+  transform/genai_response_model:
+    trace_statements:
+      - context: span
+        statements:
+          - set(attributes["gen_ai.response.model"], attributes["gen_ai.request.model"]) where attributes["gen_ai.request.model"] != nil and attributes["gen_ai.response.model"] == nil
   batch: {}
 
 exporters:
@@ -133,7 +147,7 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, transform/genai_operation_name, batch]
+      processors: [resource, transform/genai_finish_reasons, transform/genai_dify_namespace_cleanup, transform/genai_legacy_promotion, transform/genai_tool_retrieval_namespace, transform/genai_provider_name_normalize, transform/genai_operation_name, transform/genai_response_model, batch]
       exporters: [otlphttp/dynatrace, debug]
     metrics:
       receivers: [otlp]
