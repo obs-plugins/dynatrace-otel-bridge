@@ -13,17 +13,23 @@ processors:
   # GenAI. Estes spans poluem a app AI Observability (ex.: "Invocation error
   # count" inflacionado com 4xx de consola, enquanto o Failure rate real de
   # operações GenAI é 0%) e aumentam volume ingerido (custo Grail).
-  # Discriminador (validado nos dados reais): spans de consola TÊM
-  # http.request.method (POST/GET); os spans que queremos manter — dify.workflow
-  # raiz e nós LLM — são internos e têm http.request.method == nil.
-  # Rede de segurança tripla: só descarta se tiver http.request.method E não
-  # tiver gen_ai.request.model E não tiver dify.workflow_id, para nunca apanhar
-  # por engano um span com sinal GenAI ou a âncora do workflow. Os spans de
-  # consola são folhas (não são pais de nós), logo descartá-los não orfana a trace.
+  # Discriminador (validado nos dados reais): spans de consola TÊM o atributo
+  # de método HTTP; os spans que queremos manter — dify.workflow raiz e nós
+  # LLM — são internos e não têm método HTTP.
+  # A instrumentação Flask do Dify emite o dialeto HTTP antigo "http.method";
+  # "http.request.method" é a normalização do Grail, aplicada DEPOIS do
+  # Collector — logo, no ponto do pipeline, os spans de consola trazem
+  # "http.method" e não "http.request.method". Cobrimos ambos os nomes para
+  # não deixar passar ruído consoante a versão da instrumentação.
+  # Rede de segurança tripla: só descarta se tiver método HTTP (qualquer dos
+  # dois dialetos) E não tiver gen_ai.request.model E não tiver dify.workflow_id,
+  # para nunca apanhar por engano um span com sinal GenAI ou a âncora do
+  # workflow. Os spans de consola são folhas (não são pais de nós), logo
+  # descartá-los não orfana a trace.
   filter/drop_dify_console_noise:
     error_mode: ignore
     trace_conditions:
-      - span.attributes["http.request.method"] != nil and span.attributes["gen_ai.request.model"] == nil and span.attributes["dify.workflow_id"] == nil
+      - (span.attributes["http.method"] != nil or span.attributes["http.request.method"] != nil) and span.attributes["gen_ai.request.model"] == nil and span.attributes["dify.workflow_id"] == nil
   resource:
     attributes:
       - key: deployment.environment
