@@ -1,7 +1,7 @@
 # Runbook — Dify + Dynatrace OTel Bridge
 
-Guia operacional para levantar o bridge de telemetria (`dynatrace-otel-bridge`)
-ao lado de uma instalação self-hosted da Dify numa VM.
+Operational guide for bringing up the telemetry bridge (`dynatrace-otel-bridge`)
+alongside a self-hosted Dify installation on a VM.
 
 ## 1. Prerequisites
 
@@ -57,7 +57,7 @@ on the VM (its `docker/` directory, with `docker-compose.yaml` and `.env`).
    Workflow/node telemetry is now emitted natively by Dify (Track A) once the
    override points it at `otel-collector:4318`; no extra service is needed.
 
-   (Track B aposentado — ver legacy/. O Track A nativo não requer o exporter.)
+   (Track B retired — see legacy/. Track A native requires no exporter.)
 
 ## 4. Quick checks
 

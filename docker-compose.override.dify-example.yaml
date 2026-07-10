@@ -1,35 +1,36 @@
-# Override para a stack self-hosted da Dify — a integração principal deste
-# repo (não é "mais um exemplo": é o companion compose da bridge Dify +
-# Dynatrace). NÃO faz parte do compose deste repo, que só sobe o collector.
+# Override for the Dify self-hosted stack — the main integration of this repo
+# (not "just another example": it is the companion compose for the Dify +
+# Dynatrace bridge). It is NOT part of this repo's compose, which only brings up
+# the collector.
 #
-# Instalação: copiar para o diretório docker/ da instalação da Dify com o
-# nome docker-compose.override.yaml. O Docker Compose funde automaticamente
-# docker-compose.yaml + docker-compose.override.yaml quando estão na mesma
-# pasta (docker compose up já aplica as duas sem flags extra).
+# Installation: copy it into the docker/ directory of the Dify installation with
+# the name docker-compose.override.yaml. Docker Compose automatically merges
+# docker-compose.yaml + docker-compose.override.yaml when they are in the same
+# folder (docker compose up applies both with no extra flags).
 #
-# Pré-requisito: a rede "dify-otel-net" tem de já existir. Ela é criada pelo
-# compose deste repo (examples/docker-compose/docker-compose.yaml) quando o
-# otel-collector sobe — basta subir o collector antes, ou uma vez, na mesma
-# máquina.
+# Prerequisite: the "dify-otel-net" network must already exist. It is created by
+# this repo's compose (examples/docker-compose/docker-compose.yaml) when the
+# otel-collector comes up — just bring up the collector first, or once, on the
+# same machine.
 
 services:
   web:
-    # Fix do 502 na raiz: o server.js standalone do Next.js faz bind usando
-    # process.env.HOSTNAME. Sem isto fixado, o container acaba a bindar só à
-    # interface da rede para a qual o hostname do container resolve em
-    # /etc/hosts — normalmente uma única rede, não todas as que o container
-    # está ligado. Como o nginx só está nas outras redes, a ligação dele ao
-    # web falha com "connection refused" (502). Forçar 0.0.0.0 faz o server
-    # escutar em todas as interfaces, independentemente da rede/hostname.
+    # Fix for the 502 on root: Next.js's standalone server.js binds using
+    # process.env.HOSTNAME. Without this pinned, the container ends up binding
+    # only to the interface of the network its hostname resolves to in
+    # /etc/hosts — usually a single network, not all the ones the container is
+    # attached to. Since nginx is only on the other networks, its connection to
+    # web fails with "connection refused" (502). Forcing 0.0.0.0 makes the server
+    # listen on all interfaces, regardless of network/hostname.
     environment:
       HOSTNAME: "0.0.0.0"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
       OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
       OTEL_SERVICE_NAME: "dify-web"
-    # default + ssrf_proxy_network mantêm as redes originais do web no
-    # compose da Dify; dify-otel-net não é estritamente necessária aqui (o
-    # web não fala com o collector), mas é a configuração validada em
-    # produção — mantida por paridade com o que já correu com sucesso.
+    # default + ssrf_proxy_network keep web's original networks from Dify's
+    # compose; dify-otel-net is not strictly necessary here (web does not talk to
+    # the collector), but it is the production-validated configuration — kept for
+    # parity with what has already run successfully.
     networks:
       - default
       - ssrf_proxy_network

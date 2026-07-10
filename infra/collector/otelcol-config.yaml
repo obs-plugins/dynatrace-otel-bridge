@@ -7,25 +7,24 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
-  # Descarta ruído de tráfego HTTP de consola/infra do Dify (spans como
-  # GET/POST /console/api/*, /health, /openapi.json, tentativas a /api/.env, etc.)
-  # que a auto-instrumentação HTTP do Dify emite para TODAS as rotas, não só as
-  # GenAI. Estes spans poluem a app AI Observability (ex.: "Invocation error
-  # count" inflacionado com 4xx de consola, enquanto o Failure rate real de
-  # operações GenAI é 0%) e aumentam volume ingerido (custo Grail).
-  # Discriminador (validado nos dados reais): spans de consola TÊM o atributo
-  # de método HTTP; os spans que queremos manter — dify.workflow raiz e nós
-  # LLM — são internos e não têm método HTTP.
-  # A instrumentação Flask do Dify emite o dialeto HTTP antigo "http.method";
-  # "http.request.method" é a normalização do Grail, aplicada DEPOIS do
-  # Collector — logo, no ponto do pipeline, os spans de consola trazem
-  # "http.method" e não "http.request.method". Cobrimos ambos os nomes para
-  # não deixar passar ruído consoante a versão da instrumentação.
-  # Rede de segurança tripla: só descarta se tiver método HTTP (qualquer dos
-  # dois dialetos) E não tiver gen_ai.request.model E não tiver dify.workflow_id,
-  # para nunca apanhar por engano um span com sinal GenAI ou a âncora do
-  # workflow. Os spans de consola são folhas (não são pais de nós), logo
-  # descartá-los não orfana a trace.
+  # Drops Dify console/infra HTTP noise spans (GET/POST /console/api/*, /health,
+  # /openapi.json, /api/.env* scanner traffic, etc.) that Dify's HTTP
+  # auto-instrumentation emits for ALL routes, not just GenAI ones. These spans
+  # pollute the AI Observability app (e.g. "Invocation error count" inflated with
+  # console 4xx while the real GenAI failure rate is 0%) and increase ingest
+  # volume (Grail cost).
+  # Discriminator (validated on real data): console spans HAVE an HTTP method
+  # attribute; the spans we keep — workflow root and LLM nodes — are internal
+  # and have no HTTP method.
+  # Dify's Flask instrumentation emits the OLD HTTP dialect "http.method";
+  # "http.request.method" is Grail's normalization applied AFTER the Collector,
+  # so the raw attribute here is "http.method", not "http.request.method". We
+  # cover both names so noise isn't let through depending on the instrumentation
+  # version.
+  # Triple safety net: only drop if it has an HTTP method (either dialect) AND no
+  # gen_ai.request.model AND no dify.workflow_id, so we never accidentally catch
+  # a span with a GenAI signal or the workflow anchor. Console spans are leaves
+  # (not parents of nodes), so dropping them doesn't orphan the trace.
   filter/drop_dify_console_noise:
     error_mode: ignore
     trace_conditions:
@@ -36,21 +35,21 @@ processors:
         value: ${env:DEPLOYMENT_ENVIRONMENT:-development}
         action: upsert
   cumulativetodelta: {}
-  # Dify nativo (ENABLE_OTEL) emite gen_ai.response.finish_reason como string
-  # singular; a convenção oficial é gen_ai.response.finish_reasons (array).
-  # Migra o valor para o atributo em array e remove o singular, para
-  # conformidade com as OTel GenAI Semantic Conventions v1.37. Só atua nos
-  # spans onde o atributo singular existe.
+  # Dify native (ENABLE_OTEL) emits gen_ai.response.finish_reason as a singular
+  # string; the official convention is gen_ai.response.finish_reasons (array).
+  # Migrates the value into the array attribute and removes the singular one, for
+  # compliance with OTel GenAI Semantic Conventions v1.37. Only acts on spans
+  # where the singular attribute exists.
   transform/genai_finish_reasons:
     trace_statements:
       - context: span
         statements:
           - set(attributes["gen_ai.response.finish_reasons"], [attributes["gen_ai.response.finish_reason"]]) where attributes["gen_ai.response.finish_reason"] != nil
           - delete_key(attributes, "gen_ai.response.finish_reason") where attributes["gen_ai.response.finish_reason"] != nil
-  # Dify nativo (ENABLE_OTEL) emite estes 4 atributos sob o namespace gen_ai.*,
-  # mas não fazem parte da OTel GenAI Semantic Convention — são específicos do
-  # Dify. Move-os para o namespace proprietário dify.*, preservando o valor,
-  # e remove o original para não duplicar o dado.
+  # Dify native (ENABLE_OTEL) emits these 4 attributes under the gen_ai.*
+  # namespace, but they are not part of the OTel GenAI Semantic Convention — they
+  # are Dify-specific. Moves them to a dify.* namespace and removes the original
+  # to avoid duplicating the data.
   transform/genai_dify_namespace_cleanup:
     trace_statements:
       - context: span
@@ -63,17 +62,13 @@ processors:
           - delete_key(attributes, "gen_ai.user.id") where attributes["gen_ai.user.id"] != nil
           - set(attributes["dify.time_to_first_token"], attributes["gen_ai.user.time_to_first_token"]) where attributes["gen_ai.user.time_to_first_token"] != nil
           - delete_key(attributes, "gen_ai.user.time_to_first_token") where attributes["gen_ai.user.time_to_first_token"] != nil
-  # Duas lógicas distintas neste processor:
-  # Lógica A (promoção condicional): gen_ai.prompt/gen_ai.completion são a
-  # versão legada do MESMO conceito que gen_ai.input.messages/output.messages.
-  # Se a versão nova ainda não existir, o valor legado é promovido para ela;
-  # em qualquer caso o campo legado é removido no final (nunca mantemos as
-  # duas versões do mesmo dado). A condição do delete_key roda depois do set,
-  # por isso cobre tanto "acabou de ser promovido" como "já existiam ambos".
-  # Lógica B (preservação sob namespace próprio): input.value/output.value são
-  # a convenção Arize/OpenInference de "chain I/O" genérico — um conceito
-  # DIFERENTE de gen_ai.input.messages/output.messages, não deve ser fundido
-  # com ele. Só é renomeado para dify.io.*, preservando o valor.
+  # Logic A (conditional promotion): gen_ai.prompt/gen_ai.completion are the
+  # legacy version of the SAME concept as gen_ai.input.messages/output.messages.
+  # If the new version doesn't exist yet, the legacy value is promoted to it; the
+  # delete_key runs after the set (avoids keeping two versions of the same data).
+  # Logic B (preservation under own namespace): input.value/output.value are the
+  # Arize/OpenInference "chain I/O" convention — a DIFFERENT concept from
+  # gen_ai.input.messages/output.messages, must not be merged.
   transform/genai_legacy_promotion:
     trace_statements:
       - context: span
@@ -86,16 +81,12 @@ processors:
           - delete_key(attributes, "input.value") where attributes["input.value"] != nil
           - set(attributes["dify.io.output_value"], attributes["output.value"]) where attributes["output.value"] != nil
           - delete_key(attributes, "output.value") where attributes["output.value"] != nil
-  # Dify nativo emite estes atributos sob namespaces não-oficiais:
-  # - gen_ai.tool.call.result / gen_ai.tool.type: não fazem parte da
-  #   convenção oficial gen_ai.tool.* (que cobre name/description/call.id/
-  #   call.arguments, esses sim mantidos como estão); são extensões
-  #   proprietárias do Dify.
-  # - retrieval.query / retrieval.document: convenção de retrieval ainda
-  #   imatura na spec oficial OTel GenAI (sem gen_ai.retrieval.* estável);
-  #   preservamos sob dify.* e reavaliamos quando estabilizar.
-  # Mesma regra de ouro das fatias anteriores: preserva o valor sob dify.*,
-  # remove o original. Nunca perder dado.
+  # Dify native emits these attributes under non-official namespaces:
+  # - gen_ai.tool.call.result / gen_ai.tool.type are not part of the official
+  #   gen_ai.tool.* convention (which covers name/description/call.id/
+  #   call.arguments — those ARE kept as-is); they are extensions.
+  # - retrieval.query / retrieval.document: retrieval convention still immature
+  #   in the official OTel GenAI spec (no stable gen_ai.retrieval.*).
   transform/genai_tool_retrieval_namespace:
     trace_statements:
       - context: span
@@ -108,42 +99,42 @@ processors:
           - delete_key(attributes, "retrieval.query") where attributes["retrieval.query"] != nil
           - set(attributes["dify.retrieval.document"], attributes["retrieval.document"]) where attributes["retrieval.document"] != nil
           - delete_key(attributes, "retrieval.document") where attributes["retrieval.document"] != nil
-  # gen_ai.provider.name: o Dify nativo emite o valor CRU de model_provider,
-  # que para providers instalados via plugin tem a forma
-  # "{org}/{plugin}/{provider}" (ex.: "langgenius/groq/groq"). A convenção
-  # oficial OTel GenAI e a app AI Observability do Dynatrace esperam o nome
-  # limpo do provider ("groq", "openai", ...). Colapsamos para o último
-  # segmento do path removendo tudo até à última barra (greedy). Valores já
-  # limpos (sem barra) ficam inalterados. So corre quando o atributo existe.
+  # gen_ai.provider.name: Dify native emits the RAW model_provider value, which
+  # for plugin-installed providers has the form "{org}/{plugin}/{provider}"
+  # (e.g. "langgenius/groq/groq"). The official OTel GenAI convention and the
+  # Dynatrace AI Observability app expect the clean provider name ("groq",
+  # "openai", ...). We collapse to the last path segment by stripping everything
+  # up to the last slash (greedy). Already-clean values (no slash) stay
+  # unchanged. Only runs when the attribute exists.
   transform/genai_provider_name_normalize:
     trace_statements:
       - context: span
         statements:
           - replace_pattern(attributes["gen_ai.provider.name"], "^.*/", "") where attributes["gen_ai.provider.name"] != nil
-  # gen_ai.operation.name: o Dify nativo define a constante mas NUNCA a emite
-  # (o parser LLM seta model/provider/tokens/finish_reason mas não operation).
-  # A app AI Observability do Dynatrace classifica um span como "operação de
-  # modelo" com base em gen_ai.operation.name; sem ele, o modelo aparece na
-  # faceta mas NÃO é contado (widget "Number of models" fica a 0). A spec
-  # oficial GenAI define "chat" como o valor well-known para uma interação de
-  # chat com um LLM. Estes spans têm gen_ai.request.model e são nós LLM, logo
-  # são inequivocamente operações de chat. Só setamos quando há request.model
-  # e ainda não existe operation.name (não sobrescrever se algum dia o Dify
-  # passar a emitir um valor próprio).
+  # gen_ai.operation.name: Dify native defines the constant but NEVER emits it
+  # (the LLM parser sets model/provider/tokens/finish_reason but not operation).
+  # The Dynatrace AI Observability app classifies a span as a "model operation"
+  # based on gen_ai.operation.name; without it the model shows in the facet but
+  # is NOT counted ("Number of models" widget stays at 0). The official GenAI
+  # spec defines "chat" as the well-known value for a chat interaction with an
+  # LLM. These spans have gen_ai.request.model and are LLM nodes, so they are
+  # unambiguously chat operations. We only set it when request.model exists and
+  # operation.name doesn't yet (don't overwrite if Dify ever emits its own
+  # value).
   transform/genai_operation_name:
     trace_statements:
       - context: span
         statements:
           - set(attributes["gen_ai.operation.name"], "chat") where attributes["gen_ai.request.model"] != nil and attributes["gen_ai.operation.name"] == nil
-  # gen_ai.response.model: o Dify nativo só emite gen_ai.request.model (o parser
-  # LLM escreve model_name apenas em REQUEST_MODEL; não existe RESPONSE_MODEL na
-  # semconv dele). A app AI Observability do Dynatrace conta "Number of models"
-  # com countDistinct(gen_ai.response.model) — logo, sem este campo, o widget
-  # fica a 0 mesmo com o modelo presente em request.model. No Dify o modelo é
-  # selecionado explicitamente no nó LLM, sem roteamento/fallback/aliasing, pelo
-  # que request.model e response.model são por construção o mesmo valor; copiar
-  # reflete a realidade. Só corre quando request.model existe e response.model
-  # ainda não foi definido.
+  # gen_ai.response.model: Dify native only emits gen_ai.request.model (the LLM
+  # parser writes model_name only to REQUEST_MODEL; there is no RESPONSE_MODEL in
+  # its semconv). The Dynatrace AI Observability app counts "Number of models"
+  # with countDistinct(gen_ai.response.model) — so without this field the widget
+  # stays at 0 even with the model present in request.model. In Dify the model is
+  # explicitly selected in the LLM node, with no routing/fallback/aliasing, so
+  # request.model and response.model are by construction the same value; copying
+  # reflects reality. Only runs when request.model exists and response.model
+  # isn't set yet.
   transform/genai_response_model:
     trace_statements:
       - context: span
@@ -152,12 +143,12 @@ processors:
   batch: {}
 
 exporters:
-  # Exporter principal: envia para o tenant Dynatrace via OTLP/HTTP.
+  # Main exporter: sends to the Dynatrace tenant via OTLP/HTTP.
   otlphttp/dynatrace:
     endpoint: ${env:DT_OTLP_ENDPOINT}
     headers:
       Authorization: "Api-Token ${env:DT_API_TOKEN}"
-  # Útil durante o teste local: imprime um resumo do que passa no pipeline.
+  # Handy during local testing: prints a summary of what passes through the pipeline.
   debug:
     verbosity: normal
 
