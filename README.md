@@ -1,21 +1,57 @@
 # dynatrace-otel-bridge
 
-OpenTelemetry → Dynatrace telemetry bridge. Spins up an OTel Collector that receives traces, metrics, and logs via OTLP and forwards them to a Dynatrace tenant. It is application‑agnostic: any app instrumented with OTel (Dify or otherwise) can send data to it.
+An OpenTelemetry conformance bridge for Dify GenAI telemetry. It runs an OTel
+Collector that ingests Dify's native (but non-conformant) OTLP output,
+normalizes it to the official **OTel GenAI Semantic Conventions**, and forwards
+it to an observability backend.
 
-This repo is the write/emit path (telemetry going into Dynatrace).
-The read path — querying Dynatrace problems and metrics from apps — lives in a different repo (the Dify plugin).
+The pipeline is **backend-agnostic by design** and **validated against Dynatrace
+AI Observability**. Because the conformance layer emits standard OTel GenAI
+telemetry, any conformant backend (Dynatrace, Datadog, Grafana, Honeycomb, …)
+can ingest it; only the exporter and two enrichment processors are
+Dynatrace-specific. See [Portability](#portability).
+
+This repo is the **write/emit path** (telemetry going into the backend). The
+read path — querying backend problems and metrics from apps — lives in a
+separate repo (the Dify plugin).
+
+## How it works
+
+```
+  Dify (ENABLE_OTEL)  ──OTLP──►  OTel Collector  ──OTLP──►  Backend
+                        :4318    (conformance)     HTTPS    (Dynatrace, validated)
+```
+
+Dify emits node-level spans natively from its GraphEngine `ObservabilityLayer`,
+covering every invocation path (Studio, WebApp, Service API, Debugger). The
+Collector's conformance processors fix the native dialect — array-vs-string
+`finish_reasons`, clean provider names, legacy attribute promotion, namespace
+hygiene — and two enrichment processors populate fields the backend's LLM
+observability app expects. The result: node spans, token usage, cost, provider,
+and model counts render correctly downstream.
+
+For the full pipeline breakdown (each processor, the gap it fixes, and its
+portability), see [RUNBOOK.md](RUNBOOK.md#telemetry-pipeline).
 
 ## Components
 
-- `infra/collector/otelcol-config.yaml` — Collector config: OTLP receivers (gRPC + HTTP), `resource`/`batch` processors, `otlphttp` exporter to Dynatrace, `health_check` extension.
-- `examples/docker-compose/` — minimal test environment (Collector only), parameterized via `.env`.
-- `legacy/` — Track B (exporter/proxy), retired; see legacy/README.md.
+- `infra/collector/otelcol-config.yaml` — Collector config: OTLP receivers
+  (gRPC + HTTP), conformance/enrichment `transform` + `filter` processors,
+  `otlphttp` exporter, `health_check` extension.
+- `examples/docker-compose/` — minimal test environment (Collector only),
+  parameterized via `.env`.
+- `docker-compose.override.dify-example.yaml` — example override that points a
+  self-hosted Dify stack at the Collector (`ENABLE_OTEL`).
+- `legacy/` — Track B (exporter/proxy), retired; see
+  [`legacy/README.md`](legacy/README.md).
 
 ## Requirements
 
 - Docker + Docker Compose.
-- A Dynatrace tenant (SaaS or Managed).
-- An API Token with ingest scopes: `metrics.ingest`, `logs.ingest`, `openTelemetryTrace.ingest`. (These are different from the `*.read` scopes.)
+- A backend that ingests OTLP. Reference target: a Dynatrace tenant (SaaS or
+  Managed).
+- For Dynatrace: an API Token with ingest scopes `openTelemetryTrace.ingest`,
+  `metrics.ingest`, `logs.ingest` (different from the `*.read` scopes).
 
 ## Quickstart
 
@@ -34,7 +70,8 @@ curl -sf http://localhost:13133 && echo " OK"
 docker compose logs -f otel-collector
 ```
 
-Point any OTel‑instrumented app to the Collector:
+Point any OTel-instrumented app (including Dify, via the override) at the
+Collector:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # or :4317 for gRPC
@@ -42,25 +79,27 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   # or :4317 for gRPC
 
 Exposed ports: 4317 (OTLP gRPC), 4318 (OTLP HTTP), 13133 (health_check).
 
-Then confirm ingestion in Dynatrace (Distributed Traces / Metrics for your environment).
-The deployment.environment resource attribute reflects the value of DEPLOYMENT_ENVIRONMENT.
+For a full VM deployment alongside Dify, see [RUNBOOK.md](RUNBOOK.md).
 
-## Dify workflow/node telemetry
+## Portability
 
-Dify workflow/node telemetry is produced natively by Dify (Track A): with
-`ENABLE_OTEL` pointing the Dify stack at `otel-collector:4318`, the collector's
-OTTL conformance processors normalize the native GenAI attributes and forward
-them to Dynatrace, where the AI Observability app populates node spans, tokens,
-provider, and models.
+The receiver, conformance processors, and OTLP transport are backend-agnostic.
+To target a backend other than Dynatrace, replace the `otlphttp/dynatrace`
+exporter with your backend's OTLP endpoint and auth, and review the two
+Dynatrace-motivated enrichment processors
+([details](RUNBOOK.md#backend-specific-dynatrace-ai-observability-enrichment)).
 
-The former Track B (an SSE reverse-proxy/exporter on port 8088) was retired as
-redundant once Track A was validated. It is archived under `legacy/` — see
-`legacy/README.md` for what it was and why.
+**Validation status:** validated against Dynatrace AI Observability. Other
+backends are supported *by design* but not yet validated. Validating the
+backend-agnostic path against Datadog LLM Observability and Grafana/Tempo is on
+the roadmap.
 
 ## Notes
 
-- `DT_OTLP_ENDPOINT` must end with `/api/v2/otlp` — the `otlphttp` exporter appends `/v1/traces`, `/v1/metrics`, `/v1/logs`.
+- `DT_OTLP_ENDPOINT` must end with `/api/v2/otlp` — the `otlphttp` exporter
+  appends `/v1/traces`, `/v1/metrics`, `/v1/logs`.
 - Dynatrace auth uses the `Authorization: Api-Token <token>` header.
-- The config includes a `debug` exporter in addition to `otlphttp`, useful for inspecting the pipeline locally; you can remove it in production.
+- The config includes a `debug` exporter alongside `otlphttp`, useful for
+  inspecting the pipeline locally; remove it in production.
 
-For troubleshooting, see docs/troubleshooting.md.
+For troubleshooting, see [docs/troubleshooting.md](docs/troubleshooting.md).

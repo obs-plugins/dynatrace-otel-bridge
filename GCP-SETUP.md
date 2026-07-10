@@ -3,6 +3,13 @@
 Infrastructure-level setup for the VM that runs Dify + this OTel bridge.
 Application deployment steps live in [RUNBOOK.md](RUNBOOK.md).
 
+> This guide covers **Google Cloud (GCE)**, the environment the bridge was
+> tested on. GCP is not required — the stack is plain Docker Compose and runs on
+> any cloud or on-prem host. On another provider, use this as a reference for
+> sizing and firewall rules and substitute your platform's provisioning
+> commands; the application deployment in [RUNBOOK.md](RUNBOOK.md) is
+> provider-agnostic.
+
 ## VM specs
 
 - Machine type: `e2-standard-4` (4 vCPU, 16 GB RAM) — Dify's own minimum
