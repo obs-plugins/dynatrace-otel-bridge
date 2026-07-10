@@ -186,15 +186,15 @@ Note: the `otlphttp` exporter retries with backoff — transient 5xx errors may 
 
 #### Symptom
 
-Logs mostram "Partial success response" com `dropped_data_points > 0`, e mensagens tipo "Unsupported metric: 'X' - Reason: UNSUPPORTED_METRIC_TYPE_CUMULATIVE_HISTOGRAM" ou "..._MONOTONIC_CUMULATIVE_SUM". Traces/logs continuam a funcionar; só métricas específicas são descartadas.
+Logs show "Partial success response" with `dropped_data_points > 0`, and messages like "Unsupported metric: 'X' - Reason: UNSUPPORTED_METRIC_TYPE_CUMULATIVE_HISTOGRAM" or "..._MONOTONIC_CUMULATIVE_SUM". Traces/logs keep working; only specific metrics are dropped.
 
 #### Possible causes
 
-- Dynatrace exige delta temporality para métricas ingeridas via OTLP; o SDK OTel (a maioria das linguagens, incluindo Python) envia cumulative temporality por omissão.
+- Dynatrace requires delta temporality for metrics ingested via OTLP; the OTel SDK (most languages, including Python) sends cumulative temporality by default.
 
 #### How to check & fix
 
-Confirmar que o processor `cumulativetodelta` está presente no pipeline de métricas, antes do `batch` (já incluído por omissão neste repo desde 2026-07-03). Documentação oficial: https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/configuration
+Confirm that the `cumulativetodelta` processor is present in the metrics pipeline, before `batch` (already included by default in this repo since 2026-07-03). Official documentation: https://docs.dynatrace.com/docs/ingest-from/opentelemetry/collector/configuration
 
 Note: after restarting the collector, it's expected to see ONE occurrence of this warning on the first metrics export cycle — the cumulativetodelta processor has no baseline yet to compute a delta from. If the warning does not repeat on subsequent cycles (~30-60s apart), the fix is working correctly.
 
@@ -230,7 +230,7 @@ In docker‑compose: confirm that app and Collector share the same network and t
 
 Confirm the app is actually getting traffic — without activity, there is no telemetry to send.
 
-## [LEGACY — Track B aposentado] Dify workflow exporter is healthy, but node spans do not appear
+## [LEGACY — Track B retired] Dify workflow exporter is healthy, but node spans do not appear
 
 ### Symptom
 

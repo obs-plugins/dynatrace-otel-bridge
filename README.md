@@ -9,7 +9,7 @@ The read path — querying Dynatrace problems and metrics from apps — lives in
 
 - `infra/collector/otelcol-config.yaml` — Collector config: OTLP receivers (gRPC + HTTP), `resource`/`batch` processors, `otlphttp` exporter to Dynatrace, `health_check` extension.
 - `examples/docker-compose/` — minimal test environment (Collector only), parameterized via `.env`.
-- `legacy/` — Track B (exporter/proxy) aposentado; ver legacy/README.md.
+- `legacy/` — Track B (exporter/proxy), retired; see legacy/README.md.
 
 ## Requirements
 

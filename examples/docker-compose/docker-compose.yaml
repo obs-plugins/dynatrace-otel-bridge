@@ -1,29 +1,29 @@
 services:
   otel-collector:
-    # Imagem oficial Dynatrace, validada em produção (tenant SaaS).
+    # Official Dynatrace image, validated in production (SaaS tenant).
     image: dynatrace/dynatrace-otel-collector:latest
     container_name: otel-collector
     restart: unless-stopped
-    # Carrega DT_OTLP_ENDPOINT, DT_API_TOKEN e DEPLOYMENT_ENVIRONMENT para dentro
-    # do container, onde o config do collector os expande via ${env:...}.
+    # Loads DT_OTLP_ENDPOINT, DT_API_TOKEN and DEPLOYMENT_ENVIRONMENT into the
+    # container, where the collector config expands them via ${env:...}.
     env_file:
       - .env
     volumes:
-      # O compose vive em examples/docker-compose/, por isso sobe 2 níveis até à
-      # raiz do repo e entra em infra/collector/. Montado read-only.
+      # The compose file lives in examples/docker-compose/, so it goes up 2
+      # levels to the repo root and into infra/collector/. Mounted read-only.
       - ../../infra/collector/otelcol-config.yaml:/etc/otelcol-contrib/config.yaml:ro
     command: ["--config=/etc/otelcol-contrib/config.yaml"]
     ports:
       - "4317:4317"     # OTLP gRPC
       - "4318:4318"     # OTLP HTTP
-      - "13133:13133"   # health_check (opcional)
+      - "13133:13133"   # health_check (optional)
     networks:
       - dify-otel-net
 
 networks:
-  # Rede nomeada partilhada com a stack Dify (ver
-  # docker-compose.override.dify-example.yaml, na raiz do repo), para que os
-  # serviços api/worker do Dify consigam resolver "otel-collector" por nome
-  # sem fundir as duas stacks num único projeto compose.
+  # Named network shared with the Dify stack (see
+  # docker-compose.override.dify-example.yaml, at the repo root), so that Dify's
+  # api/worker services can resolve "otel-collector" by name without merging the
+  # two stacks into a single compose project.
   dify-otel-net:
     name: dify-otel-net
