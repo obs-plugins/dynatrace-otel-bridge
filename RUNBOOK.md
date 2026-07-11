@@ -195,6 +195,8 @@ queries. On another backend they may be unnecessary or need adaptation.
 | `transform/genai_operation_name` | Dify defines but never emits `gen_ai.operation.name`. | The AI Observability app classifies a span as a model operation via `gen_ai.operation.name`. Set to `"chat"` (the spec's well-known value) when `gen_ai.request.model` exists and the field is unset. Also improves conformance generally. |
 | `transform/genai_response_model` | Dify emits only `gen_ai.request.model`; `gen_ai.response.model` is never set. | The AI Observability "Number of models" tile counts via `countDistinct(gen_ai.response.model)`; without this field it reads 0. Copies request → response (valid because Dify performs no model routing/fallback/aliasing — the two are identical by construction). |
 
+A ready-to-import Dynatrace dashboard (schema v21) covering these queries is available at [dashboards/dify-genai-observability-dashboard.json](dashboards/dify-genai-observability-dashboard.json). Import via Dashboards → Actions → Edit JSON.
+
 ---
 
 ## Portability

@@ -33,6 +33,8 @@ and model counts render correctly downstream.
 For the full pipeline breakdown (each processor, the gap it fixes, and its
 portability), see [RUNBOOK.md](RUNBOOK.md#telemetry-pipeline).
 
+For the full attribute map and a DQL query library, see [data-model-and-queries.md](data-model-and-queries.md).
+
 ## Components
 
 - `infra/collector/otelcol-config.yaml` — Collector config: OTLP receivers

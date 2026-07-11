@@ -1,0 +1,291 @@
+{
+  "tiles": {
+    "0": {
+      "type": "markdown",
+      "content": "# Dify GenAI Observability\nNode-level telemetry from `langgenius/dify`, normalized to OTel GenAI semantic conventions by the conformance pipeline. See `data-model-and-queries.md` in the repo root for the attribute map and query reference."
+    },
+    "1": {
+      "type": "data",
+      "title": "Models",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter gen_ai.response.model != \"\"\n| summarize models = countDistinct(gen_ai.response.model)",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "singleValue": {
+          "showTrend": false,
+          "showSparkLine": false,
+          "alignment": "center"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "2": {
+      "type": "data",
+      "title": "LLM requests",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.request.model)\n| summarize requests = count()",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "singleValue": {
+          "showTrend": false,
+          "showSparkLine": false,
+          "alignment": "center"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "3": {
+      "type": "data",
+      "title": "Total tokens",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.usage.total_tokens)\n| summarize tokens = sum(gen_ai.usage.total_tokens)",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "singleValue": {
+          "showTrend": false,
+          "showSparkLine": false,
+          "alignment": "center"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "4": {
+      "type": "data",
+      "title": "Providers",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.provider.name)\n| summarize providers = countDistinct(gen_ai.provider.name)",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "singleValue": {
+          "showTrend": false,
+          "showSparkLine": false,
+          "alignment": "center"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "5": {
+      "type": "markdown",
+      "content": "## Traffic & latency"
+    },
+    "6": {
+      "type": "data",
+      "title": "Requests over time",
+      "query": "timeseries requests = count(), by:{gen_ai.response.model}\n, filter: { service.name == \"langgenius/dify\" and isNotNull(gen_ai.request.model) }",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "chartSettings": {
+          "gapPolicy": "connect"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "7": {
+      "type": "data",
+      "title": "Latency p50 / p95 (ms)",
+      "query": "timeseries { p50 = percentile(duration, 50), p95 = percentile(duration, 95) }, by:{gen_ai.response.model}\n, filter: { service.name == \"langgenius/dify\" and isNotNull(gen_ai.request.model) }",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "chartSettings": {
+          "gapPolicy": "connect"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "8": {
+      "type": "markdown",
+      "content": "## Tokens & cost"
+    },
+    "9": {
+      "type": "data",
+      "title": "Tokens by model",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.usage.total_tokens)\n| summarize { input = sum(gen_ai.usage.input_tokens), output = sum(gen_ai.usage.output_tokens), total = sum(gen_ai.usage.total_tokens) }, by:{gen_ai.response.model}\n| sort total desc",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "autoSelectVisualization": false
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "10": {
+      "type": "data",
+      "title": "Input vs output tokens over time",
+      "query": "timeseries { input = sum(gen_ai.usage.input_tokens), output = sum(gen_ai.usage.output_tokens) }\n, filter: { service.name == \"langgenius/dify\" and isNotNull(gen_ai.usage.total_tokens) }",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "lineChart",
+      "visualizationSettings": {
+        "autoSelectVisualization": false,
+        "chartSettings": {
+          "gapPolicy": "connect"
+        }
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "11": {
+      "type": "markdown",
+      "content": "## Providers & health"
+    },
+    "12": {
+      "type": "data",
+      "title": "Provider distribution",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.provider.name)\n| summarize count(), by:{gen_ai.provider.name}\n| sort `count()` desc",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "autoSelectVisualization": false
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "13": {
+      "type": "data",
+      "title": "Model requests breakdown",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(gen_ai.request.model)\n| summarize requests = count(), by:{gen_ai.response.model, gen_ai.provider.name}\n| sort requests desc",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "autoSelectVisualization": false
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    },
+    "14": {
+      "type": "data",
+      "title": "Console-noise check (should be empty)",
+      "query": "fetch spans\n| filter service.name == \"langgenius/dify\"\n| filter isNotNull(http.method)\n| filter isNull(gen_ai.request.model)\n| summarize count(), by:{span.name}\n| sort `count()` desc\n| limit 20",
+      "querySettings": {
+        "defaultSamplingRatio": 10,
+        "defaultScanLimitGbytes": 500,
+        "enableSampling": false,
+        "maxResultMegaBytes": 1,
+        "maxResultRecords": 1000
+      },
+      "visualization": "table",
+      "visualizationSettings": {
+        "autoSelectVisualization": false
+      },
+      "davis": {
+        "enabled": false,
+        "davisVisualization": { "isAvailable": true }
+      }
+    }
+  },
+  "layouts": {
+    "0":  { "x": 0,  "y": 0,  "w": 24, "h": 2 },
+    "1":  { "x": 0,  "y": 2,  "w": 6,  "h": 4 },
+    "2":  { "x": 6,  "y": 2,  "w": 6,  "h": 4 },
+    "3":  { "x": 12, "y": 2,  "w": 6,  "h": 4 },
+    "4":  { "x": 18, "y": 2,  "w": 6,  "h": 4 },
+    "5":  { "x": 0,  "y": 6,  "w": 24, "h": 1 },
+    "6":  { "x": 0,  "y": 7,  "w": 12, "h": 6 },
+    "7":  { "x": 12, "y": 7,  "w": 12, "h": 6 },
+    "8":  { "x": 0,  "y": 13, "w": 24, "h": 1 },
+    "9":  { "x": 0,  "y": 14, "w": 12, "h": 6 },
+    "10": { "x": 12, "y": 14, "w": 12, "h": 6 },
+    "11": { "x": 0,  "y": 20, "w": 24, "h": 1 },
+    "12": { "x": 0,  "y": 21, "w": 8,  "h": 6 },
+    "13": { "x": 8,  "y": 21, "w": 8,  "h": 6 },
+    "14": { "x": 16, "y": 21, "w": 8,  "h": 6 }
+  },
+  "variables": [],
+  "annotations": [],
+  "settings": {},
+  "importedWithCode": false,
+  "version": 21
+}
