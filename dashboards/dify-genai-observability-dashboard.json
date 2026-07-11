@@ -2,7 +2,7 @@
   "tiles": {
     "0": {
       "type": "markdown",
-      "content": "# Dify GenAI Observability\nNode-level telemetry from `langgenius/dify`, normalized to OTel GenAI semantic conventions by the conformance pipeline. See the repo's `docs/data-model-and-queries.md` for the attribute map and query reference."
+      "content": "# Dify GenAI Observability\nNode-level telemetry from `langgenius/dify`, normalized to OTel GenAI semantic conventions by the conformance pipeline. See `data-model-and-queries.md` in the repo root for the attribute map and query reference."
     },
     "1": {
       "type": "data",
